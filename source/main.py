@@ -96,6 +96,7 @@ class CaroGame:
         self.mode         = self.MODE_AB   # Mặc định Alpha-Beta
         self.depth        = 3
         self.status       = "playing"      # playing | player_win | ai_win | draw
+        self.ai_first     = False          # Biến lưu trạng thái Máy đi trước hay Người đi trước
         self.player_turn  = True
         self.computing    = False
         self.stats        = None           # Thống kê nước đi AI gần nhất
@@ -122,15 +123,21 @@ class CaroGame:
         self.btn_ab.active = True
 
         # Chọn độ sâu
-        self.btn_depth = [Button(px + i * 33, 68, 28, 25, str(i + 1), f)
+        self.btn_depth = [Button(px + 60 + i * 33, 68, 28, 25, str(i + 1), f)
                           for i in range(4)]
         self.btn_depth[self.depth - 1].active = True
+
+        # Chọn người đi trước
+        self.btn_first_p = Button(px + 70, 104, 85, 25, "Nguoi (X)", f)
+        self.btn_first_a = Button(px + 159, 104, 85, 25, "May (O)", f)
+        self.btn_first_p.active = True
 
         # Ván mới
         self.btn_new = Button(px, WIN_H - 48, PANEL_W - MARGIN, 32,
                               "Van moi  [R]", self.f_med)
 
-        self._all_buttons = ([self.btn_mm, self.btn_ab, self.btn_cmp, self.btn_new]
+        self._all_buttons = ([self.btn_mm, self.btn_ab, self.btn_cmp, self.btn_new,
+                              self.btn_first_p, self.btn_first_a]
                              + self.btn_depth)
 
     # ─── Reset game ───────────────────────────────────────────────────────────
@@ -140,12 +147,21 @@ class CaroGame:
             return
         self.board         = Board()
         self.status        = "playing"
-        self.player_turn   = True
         self.stats         = None
         self.compare_stats = None
         self.win_line      = None
         self.last_ai       = None
         self.move_log      = []
+
+        # Nếu chọn Máy đi trước, kích hoạt AI chạy ngay lập tức
+        if self.ai_first:
+            self.player_turn = False
+            self.computing   = True
+            t = threading.Thread(target=self._ai_move_thread, daemon=True)
+            t.start()
+        else:
+            self.player_turn = True
+            self.computing   = False
 
     # ─── Xử lý sự kiện ───────────────────────────────────────────────────────
 
@@ -159,6 +175,14 @@ class CaroGame:
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_r:
                     self.reset()
+                
+                # KHÔI PHỤC LẠI: Phím SPACE để ép AI tính toán nước đi
+                if event.key == pygame.K_SPACE:
+                    if not self.computing and self.status == "playing":
+                        self.player_turn = False
+                        self.computing = True
+                        t = threading.Thread(target=self._ai_move_thread, daemon=True)
+                        t.start()
 
             if event.type == pygame.MOUSEMOTION:
                 mx, my = event.pos
@@ -168,9 +192,20 @@ class CaroGame:
                 r = (my - BOARD_Y) // CELL
                 self.hover_cell = (r, c) if (0 <= r < N and 0 <= c < N) else None
 
-            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            # KHÔI PHỤC LẠI: Phân biệt Chuột trái và Chuột phải
+            if event.type == pygame.MOUSEBUTTONDOWN:
                 mx, my = event.pos
-                self._handle_click(mx, my)
+                if event.button == 1:
+                    # Chuột trái: Đánh quân X hoặc bấm nút giao diện
+                    self._handle_click(mx, my)
+                elif event.button == 3:
+                    # Chuột phải: Trực tiếp đặt quân O (Máy) lên bàn cờ
+                    if (BOARD_X <= mx < BOARD_X + N * CELL and BOARD_Y <= my < BOARD_Y + N * CELL):
+                        c = (mx - BOARD_X) // CELL
+                        r = (my - BOARD_Y) // CELL
+                        # Chỉ cho phép đặt khi ô trống và AI không bận tính toán
+                        if self.board.grid[r][c] == EMPTY and not self.computing:
+                            self.board.place(r, c, AI)
 
     def _handle_click(self, mx, my):
         # Click lên bàn cờ
@@ -181,8 +216,9 @@ class CaroGame:
             self._player_move(r, c)
             return
 
-        # Nút thuật toán
+        # Tương tác với các nút bấm (Chỉ khi AI không bận tính toán)
         if not self.computing:
+            # Nhóm nút thuật toán
             if self.btn_mm.clicked(mx, my):
                 self.mode = self.MODE_MINIMAX
                 self.btn_mm.active  = True
@@ -199,15 +235,27 @@ class CaroGame:
                 self.btn_ab.active  = False
                 self.btn_cmp.active = True
 
-        # Nút độ sâu
-        for i, btn in enumerate(self.btn_depth):
-            if btn.clicked(mx, my) and not self.computing:
-                self.depth = i + 1
-                for b in self.btn_depth:
-                    b.active = False
-                btn.active = True
+            # Nhóm nút lượt đi trước
+            if self.btn_first_p.clicked(mx, my) and self.ai_first:
+                self.ai_first = False
+                self.btn_first_p.active = True
+                self.btn_first_a.active = False
+                self.reset()  # Reset lại game ngay khi đổi người đi trước
+            if self.btn_first_a.clicked(mx, my) and not self.ai_first:
+                self.ai_first = True
+                self.btn_first_p.active = False
+                self.btn_first_a.active = True
+                self.reset()
 
-        # Ván mới
+            # Nút độ sâu
+            for i, btn in enumerate(self.btn_depth):
+                if btn.clicked(mx, my):
+                    self.depth = i + 1
+                    for b in self.btn_depth:
+                        b.active = False
+                    btn.active = True
+
+        # Nút ván mới
         if self.btn_new.clicked(mx, my):
             self.reset()
 
@@ -228,11 +276,15 @@ class CaroGame:
             self.status = "draw"
             return
 
-        # Chuyển lượt cho AI
-        self.player_turn = False
-        self.computing   = True
-        t = threading.Thread(target=self._ai_move_thread, daemon=True)
-        t.start()
+        # TẠM THỜI TẮT CHUYỂN LƯỢT CHO AI ĐỂ RẢNH TAY SETUP BÀN CỜ BẰNG CHUỘT TRÁI
+        # Nếu bạn muốn chơi bình thường (AI tự đánh lại sau khi bạn click chuột trái),
+        # hãy bỏ comment 4 dòng bên dưới.
+        # Nhưng để test, ta tạm thời tắt đi. Bạn sẽ ấn SPACE để gọi AI.
+        
+        # self.player_turn = False
+        # self.computing   = True
+        # t = threading.Thread(target=self._ai_move_thread, daemon=True)
+        # t.start()
 
     # ─── AI tính nước đi (chạy trên thread riêng) ────────────────────────────
 
@@ -363,12 +415,19 @@ class CaroGame:
         # Nút độ sâu
         self.screen.blit(
             self.f_small.render("Do sau:", True, TXT_DIM),
-            (px, 100))
+            (px, 74))
         for btn in self.btn_depth:
             btn.draw(self.screen)
 
+        # Nút lượt đi trước
+        self.screen.blit(
+            self.f_small.render("Di truoc:", True, TXT_DIM),
+            (px, 110))
+        self.btn_first_p.draw(self.screen)
+        self.btn_first_a.draw(self.screen)
+
         # Trạng thái lượt chơi
-        cy = 128
+        cy = 145
         if self.status == "playing":
             if self.computing:
                 msg = "May dang tinh..."
@@ -514,6 +573,17 @@ class CaroGame:
             self.screen.blit(
                 self.f_small.render("* So sanh: ca 2 thuat toan chay", True, TXT_GREEN),
                 (px, leg_y + 42))
+        
+        # Chú thích cách test
+        self.screen.blit(
+            self.f_small.render("* MEO TEST:", True, TXT_YELLOW),
+            (px, leg_y + 56))
+        self.screen.blit(
+            self.f_small.render("  1. Chuot phai: Xep O", True, TXT_DIM),
+            (px, leg_y + 70))
+        self.screen.blit(
+            self.f_small.render("  2. Phim SPACE: Goi AI", True, TXT_DIM),
+            (px, leg_y + 84))
 
         # ── Nút ván mới ───────────────────────────────────────────────────────
         self.btn_new.active = False

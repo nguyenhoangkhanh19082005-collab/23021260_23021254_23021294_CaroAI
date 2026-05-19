@@ -36,8 +36,8 @@ Khi cài trên Windows, **tick vào "Add Python to PATH"**.
 ### Bước 2 — Clone repository
 
 ```bash
-git clone https://github.com/<ten-nhom>/<ten-repo>.git
-cd <ten-repo>
+git clone https://github.com/nguyenhoangkhanh19082005-collab/23021260_23021254_23021294_CaroAI.git
+cd 23021260_23021254_23021294_CaroAI
 ```
 
 Hoặc tải ZIP về và giải nén.
